@@ -362,10 +362,32 @@ module ActionController # :nodoc:
         mark_for_same_origin_verification!
 
         if !verified_request?
-          logger.warn unverified_request_warning_message if logger && log_warning_on_csrf_failure
+          notify_unverified_request
 
           handle_unverified_request
         end
+      end
+
+      def notify_unverified_request
+        payload = {
+          message: unverified_request_warning_message
+        }
+
+        if valid_request_origin?
+          payload.merge!(
+            failure_type: :authenticity_token
+          )
+        else
+          payload.merge!(
+            failure_type: :origin,
+            origin: request.origin,
+            base_url: request.base_url
+          )
+        end
+        ActiveSupport::Notifications.instrument(
+          "request_verification_failure.action_controller",
+          *payload
+        )
       end
 
       def handle_unverified_request # :doc:

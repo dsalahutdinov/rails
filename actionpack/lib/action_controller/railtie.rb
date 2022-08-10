@@ -129,5 +129,13 @@ module ActionController
         ActionController::TestCase.executor_around_each_request = app.config.active_support.executor_around_test_case
       end
     end
+
+    initializer "action_contoller.log_request_verification_failure" do |app|
+      ActiveSupport::Notifications.subscribe("request_verification_failure.action_controller") do |name, start, finish, id, payload| 
+        if app.logger && ActionController::Base.log_warning_on_csrf_failure
+          logger.warn payload[:message]
+        end
+      end
+    end
   end
 end
