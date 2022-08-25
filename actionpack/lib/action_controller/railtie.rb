@@ -103,6 +103,13 @@ module ActionController
         if app.config.action_controller.default_protect_from_forgery
           protect_from_forgery with: :exception
         end
+
+        ActiveSupport::Notifications.subscribe("request_verification_failure.action_controller") do |name, start, finish, id, payload|
+          logger = ActionController::Base.logger
+          if logger && ActionController::Base.log_warning_on_csrf_failure
+            logger.warn payload[:message]
+          end
+        end
       end
     end
 
@@ -127,14 +134,6 @@ module ActionController
     initializer "action_controller.test_case" do |app|
       ActiveSupport.on_load(:action_controller_test_case) do
         ActionController::TestCase.executor_around_each_request = app.config.active_support.executor_around_test_case
-      end
-    end
-
-    initializer "action_contoller.log_request_verification_failure" do |app|
-      ActiveSupport::Notifications.subscribe("request_verification_failure.action_controller") do |name, start, finish, id, payload| 
-        if app.logger && ActionController::Base.log_warning_on_csrf_failure
-          logger.warn payload[:message]
-        end
       end
     end
   end

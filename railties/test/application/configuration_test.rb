@@ -1580,6 +1580,45 @@ module ApplicationTests
       assert_includes ActionController::Base.__callbacks[:process_action].map(&:filter), :verify_authenticity_token
     end
 
+    test "config.action_controller.request_validation_failure is listened by default" do
+      app_file "config/initializers/wrap_parameters.rb", <<-RUBY
+        ActionController::Base.wrap_parameters format: [:json]
+      RUBY
+
+      app_file "app/models/post.rb", <<-RUBY
+      class Post
+        def self.attribute_names
+          %w(title)
+        end
+      end
+      RUBY
+
+      app_file "app/controllers/application_controller.rb", <<-RUBY
+      class ApplicationController < ActionController::Base
+        protect_from_forgery with: :exception
+      end
+      RUBY
+
+      app_file "app/controllers/posts_controller.rb", <<-RUBY
+      class PostsController < ApplicationController
+        def create
+          render plain: params[:post].inspect
+        end
+      end
+      RUBY
+
+      add_to_config <<-RUBY
+        routes.prepend do
+          resources :posts
+        end
+      RUBY
+
+      app "development"
+
+      post "/posts.json", '{ "title": "foo" }', "CONTENT_TYPE" => "application/json"
+      assert_equal '#<ActionController::Parameters {"title"=>"foo"} permitted: false>', last_response.body
+    end
+
     test "config.action_controller.permit_all_parameters can be configured in an initializer" do
       app_file "config/initializers/permit_all_parameters.rb", <<-RUBY
         Rails.application.config.action_controller.permit_all_parameters = true

@@ -374,9 +374,7 @@ module ActionController # :nodoc:
         }
 
         if valid_request_origin?
-          payload.merge!(
-            failure_type: :authenticity_token
-          )
+          payload[:failure_type] = :authenticity_token
         else
           payload.merge!(
             failure_type: :origin,
@@ -386,7 +384,7 @@ module ActionController # :nodoc:
         end
         ActiveSupport::Notifications.instrument(
           "request_verification_failure.action_controller",
-          *payload
+          payload
         )
       end
 

@@ -239,8 +239,26 @@ class CustomCsrfTokenStorageStrategyController < ActionController::Base
     store: CustomStrategy.new
 end
 
+module NotificationsCatcher
+  def with_notification(event_name, &block)
+    payloads = []
+      subscriber = proc do |*args|
+      event = ActiveSupport::Notifications::Event.new(*args)
+      payloads.push(event.payload)
+    end
+
+    ActiveSupport::Notifications.subscribed(subscriber, event_name) do
+      block.call
+    end
+    
+    payloads
+  end
+end
+
 # common test methods
 module RequestForgeryProtectionTests
+  include NotificationsCatcher
+
   def setup
     @token = Base64.urlsafe_encode64("railstestrailstestrailstestrails")
     @old_request_forgery_protection_token = ActionController::Base.request_forgery_protection_token
@@ -535,42 +553,36 @@ module RequestForgeryProtectionTests
   end
 
   def test_should_block_post_with_origin_checking_and_wrong_origin
-    old_logger = ActionController::Base.logger
-    logger = ActiveSupport::LogSubscriber::TestHelper::MockLogger.new
-    ActionController::Base.logger = logger
-
-    forgery_protection_origin_check do
-      initialize_csrf_token
-      @controller.stub :form_authenticity_token, @token do
-        assert_blocked do
-          @request.set_header "HTTP_ORIGIN", "http://bad.host"
-          post :index, params: { custom_authenticity_token: @token }
+    payloads = with_notification("request_verification_failure.action_controller") do
+      forgery_protection_origin_check do
+        initialize_csrf_token
+        @controller.stub :form_authenticity_token, @token do
+          assert_blocked do
+            @request.set_header "HTTP_ORIGIN", "http://bad.host"
+            post :index, params: { custom_authenticity_token: @token }
+          end
         end
       end
     end
 
+    payload = payloads.first
     assert_match(
       "HTTP Origin header (http://bad.host) didn't match request.base_url (http://test.host)",
-      logger.logged(:warn).last
+      payload[:message]
     )
-  ensure
-    ActionController::Base.logger = old_logger
+    assert_equal :origin, payload[:failure_type]
+    assert_equal 'http://bad.host', payload[:origin]
+    assert_equal 'http://test.host', payload[:base_url]
   end
 
 
   def test_should_warn_on_missing_csrf_token
-    old_logger = ActionController::Base.logger
-    logger = ActiveSupport::LogSubscriber::TestHelper::MockLogger.new
-    ActionController::Base.logger = logger
-
-    begin
+    payloads = with_notification("request_verification_failure.action_controller") do
       assert_blocked { post :index }
-
-      assert_equal 1, logger.logged(:warn).size
-      assert_match(/CSRF token authenticity/, logger.logged(:warn).last)
-    ensure
-      ActionController::Base.logger = old_logger
     end
+
+    assert_equal 1, payloads.size
+    assert_match(/CSRF token authenticity/, payloads.last[:message])
   end
 
   def test_should_not_warn_if_csrf_logging_disabled
@@ -721,7 +733,6 @@ module RequestForgeryProtectionTests
 end
 
 # OK let's get our test on
-
 class RequestForgeryProtectionControllerUsingResetSessionTest < ActionController::TestCase
   include RequestForgeryProtectionTests
 
@@ -832,6 +843,7 @@ class PrependProtectForgeryBaseControllerTest < ActionController::TestCase
 end
 
 class FreeCookieControllerTest < ActionController::TestCase
+  include NotificationsCatcher
   def setup
     @controller = FreeCookieController.new
     @token      = "cf50faa3fe97702ca1ae"
@@ -869,6 +881,8 @@ class FreeCookieControllerTest < ActionController::TestCase
 end
 
 class CustomAuthenticityParamControllerTest < ActionController::TestCase
+  include NotificationsCatcher
+
   def setup
     super
     @old_logger = ActionController::Base.logger
@@ -896,14 +910,10 @@ class CustomAuthenticityParamControllerTest < ActionController::TestCase
   end
 
   def test_should_warn_if_form_authenticity_param_does_not_match_form_authenticity_token
-    ActionController::Base.logger = @logger
-
-    begin
+    payloads = with_notification("request_verification_failure.action_controller") do
       post :index, params: { custom_token_name: "bazqux" }
-      assert_equal 1, @logger.logged(:warn).size
-    ensure
-      ActionController::Base.logger = @old_logger
     end
+    assert_equal 1, payloads.size
   end
 end
 
